@@ -381,7 +381,7 @@ class Cluster(object):
         availability zone between those volumes. If an availability zone
         is explicitly specified in the config and does not match the common
         availability zone of the volumes, an exception is raised. If all
-        volumes are not in the same availabilty zone an exception is raised.
+        volumes are not in the same availability zone an exception is raised.
         If no volumes are specified, returns the user specified availability
         zone if it exists.
         """
@@ -412,7 +412,7 @@ class Cluster(object):
         not specified.
 
         This method assigns the first volume to /dev/sdz, second to /dev/sdy,
-        etc for all volumes that do not include a device/partition setting
+        etc. for all volumes that do not include a device/partition setting
         """
         devices = ['/dev/sd%s' % s for s in string.lowercase]
         devmap = {}
@@ -752,6 +752,7 @@ class Cluster(object):
         if not placement_group and instance_type in static.CLUSTER_TYPES:
             placement_group = self.placement_group.name
         image_id = image_id or self.node_image_id
+        count = len(aliases) if not spot_bid else 1
         security_groups = [cluster_sg] + self.static_security_groups
  
         kwargs = dict(price=spot_bid, instance_type=instance_type,
