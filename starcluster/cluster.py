@@ -324,6 +324,7 @@ class Cluster(object):
             volumes=[],
             plugins=[],
             permissions=[],
+            static_security_groups=[],
             refresh_interval=30,
             disable_queue=False,
             disable_threads=False,
@@ -357,6 +358,7 @@ class Cluster(object):
         self.refresh_interval = refresh_interval
         self.disable_queue = disable_queue
         self.disable_threads = disable_threads
+        self.static_security_groups=static_security_groups
         self.force_spot_master = force_spot_master
 
         self.__instance_types = static.INSTANCE_TYPES
@@ -756,9 +758,10 @@ class Cluster(object):
             placement_group = self.placement_group.name
         image_id = image_id or self.node_image_id
         count = len(aliases) if not spot_bid else 1
+        security_groups = [cluster_sg] + self.static_security_groups
         kwargs = dict(price=spot_bid, instance_type=instance_type,
                       min_count=count, max_count=count, count=count,
-                      key_name=self.keyname, security_groups=[cluster_sg],
+                      key_name=self.keyname, security_groups=security_groups,
                       availability_zone_group=cluster_sg,
                       launch_group=cluster_sg, placement=zone or self.zone,
                       user_data='|'.join(aliases),
