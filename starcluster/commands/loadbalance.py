@@ -1,8 +1,7 @@
 from starcluster import exception
 from starcluster.balancers import sge
-
+import os,grp,signal,daemon,lockfile,daemon
 from completers import ClusterCompleter
-
 
 class CmdLoadBalance(ClusterCompleter):
     """
@@ -73,6 +72,9 @@ class CmdLoadBalance(ClusterCompleter):
         parser.add_option("-n", "--min_nodes", dest="min_nodes",
                           action="store", type="int", default=None,
                           help="Minimum number of nodes in cluster")
+        parser.add_option("--daemon", dest="daemonize",
+                          action="store", default=False,
+                          help="Daemonize LoadBalancer")
         parser.add_option("-K", "--kill-master", dest="allow_master_kill",
                           action="store_true", default=None,
                           help="Allow the master to be killed when "
@@ -86,4 +88,15 @@ class CmdLoadBalance(ClusterCompleter):
         cluster_tag = args[0]
         cluster = self.cm.get_cluster(cluster_tag)
         lb = sge.SGELoadBalancer(**self.specified_options_dict)
-        lb.run(cluster)
+
+        dcontext = daemon.DaemonContext(
+            working_directory='.',
+            pidfile=lockfile.FileLock('/tmp/%s_loadbalancer.pid' % cluster_tag),
+        )
+
+
+        if False:
+	    with dcontext:
+                lb.run(cluster)
+        else:
+            lb.run(cluster)

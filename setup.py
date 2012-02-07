@@ -14,7 +14,8 @@ try:
                  tests_require="nose",
                  install_requires=["paramiko==1.7.7.1", "boto==2.0",
                                    "workerpool==0.9.2", "Jinja2==2.5.5",
-                                   "decorator==3.3.1", "pyasn1==0.0.13b"],
+                                   "decorator==3.3.1", "pyasn1==0.0.13b",
+                                   "python-daemon==1.5.5"],				   
                  include_package_data=True,
                  entry_points=dict(console_scripts=console_scripts),
                  zip_safe=False)

@@ -390,7 +390,7 @@ class SGELoadBalancer(LoadBalancer):
     def __init__(self, interval=60, max_nodes=None, wait_time=900,
                  add_pi=1, kill_after=45, stab=180, lookback_win=3,
                  min_nodes=1, allow_master_kill=False, plot_stats=False,
-                 plot_output_dir=None, dump_stats=False, stats_file=None):
+                 plot_output_dir=None, dump_stats=False, stats_file=None, daemonize=False):
         self._cluster = None
         self._keep_polling = True
         self._visualizer = None
@@ -405,6 +405,7 @@ class SGELoadBalancer(LoadBalancer):
         self.lookback_window = lookback_win
         self.min_nodes = min_nodes
         self.allow_master_kill = allow_master_kill
+	self.daemonize=daemonize
         if self.longest_allowed_queue_time < 300:
             log.warn("The recommended wait_time should be >= 300 seconds "
                      "(it takes ~5 min to launch a new EC2 node)")
@@ -634,6 +635,7 @@ class SGELoadBalancer(LoadBalancer):
             log.info("Not adding nodes: already at or above maximum (%d)" %
                      self.max_nodes)
             return 0
+
         qlen = len(self.stat.get_queued_jobs())
         sph = self.stat.slots_per_host()
         ts = self.stat.count_total_slots()
@@ -641,25 +643,31 @@ class SGELoadBalancer(LoadBalancer):
         avg_duration = self.stat.avg_job_duration()
         #calculate estimated time to completion
         ettc = avg_duration * qlen / len(self.stat.hosts)
-        if qlen > ts:
-            if not self.has_cluster_stabilized():
-                return 0
-            #there are more jobs queued than will be consumed with one
-            #cycle of job processing from all nodes
-            oldest_job_dt = self.stat.oldest_queued_job_age()
-            now = self.get_remote_time()
-            age_delta = now - oldest_job_dt
-            if age_delta.seconds > self.longest_allowed_queue_time:
-                log.info("A job has been waiting for %d sec, longer than "
-                         "max %d" % (age_delta.seconds,
-                                      self.longest_allowed_queue_time))
-                need_to_add = qlen / sph
-                if ettc < 600 and not self.stat.on_first_job():
-                    log.warn("There is a possibility that the job queue is"
-                             " shorter than 10 minutes in duration")
-                    #need_to_add = 0
+
+        if qlen<1 or not self.has_cluster_stabilized():
+            return 0
+
+        #there are more jobs queued than will be consumed with one
+        #cycle of job processing from all nodes
+        oldest_job_dt = self.stat.oldest_queued_job_age()
+        now = self.get_remote_time()
+        age_delta = now - oldest_job_dt
+        if age_delta.seconds > self.longest_allowed_queue_time:
+            log.info("A job has been waiting for %d sec, longer than "
+                     "max %d" % (age_delta.seconds,
+                                 self.longest_allowed_queue_time))
+            need_to_add = max(1, qlen / sph)
+      
+         
+        log.info("1-Need to add %s nodes" % need_to_add);
+        if ettc < 600 and not self.stat.on_first_job():
+            log.warn("There is a possibility that the job queue is"
+                     " shorter than 10 minutes in duration")
+            #need_to_add = 0
         max_add = self.max_nodes - len(self.stat.hosts)
         need_to_add = min(self.add_nodes_per_iteration, need_to_add, max_add)
+        log.info("2-Need to add %s nodes" % need_to_add);
+
         if need_to_add > 0:
             log.info("*** ADDING %d NODES at %s" %
                      (need_to_add, str(datetime.datetime.utcnow())))
@@ -691,7 +699,11 @@ class SGELoadBalancer(LoadBalancer):
                     log.info("No nodes can be killed at this time")
                 #kill the nodes returned
                 for n in to_kill:
-                    if n.update() == "running":
+                    if len(self.stat.hosts) <= self.min_nodes:
+                        log.info("Not removing any additional idle nodes: already at minimum (%d)" 
+				% self.min_nodes)
+			return
+                    if n.update() == "running": 
                         log.info("***REMOVING NODE: %s (%s)" % (n.id,
                                                                 n.dns_name))
                         try:
