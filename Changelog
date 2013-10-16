@@ -5,6 +5,319 @@ Version History
 .. contents::
     :local:
 
+.. _version-0.94.1:
+
+0.94.1
+======
+
+.. _v0941-news:
+
+News
+----
+Version 0.94.1 of StarCluster is a bug fix release. See the "Features" and
+"Bug Fixes" sections below for details. In general it's recommended to
+terminate all clusters before upgrading to new versions of StarCluster
+although this is not always strictly required.
+
+.. _v0941-features:
+
+Features
+--------
+* restart: add ``--reboot-only`` option
+* awsutils: force ``delete_on_termation`` on root volume when launching
+  instances
+* delay using optional imports in starcluster.utils until needed (reduces the
+  time it takes to load StarCluster)
+
+.. _v0941-fixes:
+
+Bug Fixes
+---------
+* cluster: wait for all instance and spot requests to propagate (fixes
+  'instance not found' errors and 'missing' spot requests when waiting for
+  cluster to come up)
+* cluster: terminate any instance that's been pending for more than 15 minutes
+  (fixes infinite wait due to a forever pending node)
+* s3image: fix block device map issue when host instance is EBS-backed
+* awsutils: fix custom block device map for S3 instances/AMIs
+* sshnode: fix keypair validation bug
+* node: fix for duplicate entries in known_hosts file
+* node: fix bug where credentials attributes were missing from node.ec2 object
+* loadbalancer: always pass ``--utc`` when calling date command
+* loadbalancer: set matplotlib backend to Agg - allows ``--plot`` option to
+  work without a display
+* config: convert ``EC2_CERT`` and ``EC2_PRIVATE_KEY`` in ``[aws]`` section to
+  absolute path
+* config: fix typo in config template (``PROTOCOL`` -> ``IP_PROTOCOL``)
+* tmux plugin: fix race condition where ``new-window -t`` is called before
+  ``new-session`` has finished
+* spothistory: update help docs for ``--plot`` option
+
+.. _version-0.94:
+
+0.94
+====
+
+.. _v094-news:
+
+News
+----
+Version 0.94 of StarCluster is a feature release that fixes *many* bugs. See
+the "Features" and "Bug Fixes" sections below for details.  This release is
+not compatible with any active clusters that were created using any previous
+version of StarCluster. Please terminate all existing clusters before
+upgrading to 0.94.
+
+.. _v094-features:
+
+Features
+--------
+* Support for hs1.8xlarge, hi1.4xlarge, and m3 instance types
+* Added support for userdata scripts (new cluster setting: userdata_scripts)
+* Add *all* ephemeral drives for any instance type when launching instances
+* Updated base AMIs to latest 12.04 versions
+* OGS (formerly SGE): set default parallel environment allocation_rule to $fill_up
+* Added authentication agent forwarding to sshmaster, sshnode, and sshinstance
+* Support for loading config based on ``$STARCLUSTER_CONFIG`` environment
+  variable
+* New plugin to install python packages with pip (pypkginstaller plugin)
+* New plugin that either copies or autogenerates a boto config for the cluster
+  user
+* Added ``--force`` option to terminate/stop commands
+* Add tags and virtualization type to listinstance output
+* Add ``--zone`` (``-z``) option to spothistory command
+
+.. _v094-fixes:
+
+Bug Fixes
+---------
+* sshutils: source /etc/profile by default
+* awsutils: validate AWS SSL certificates by default
+* awsutils: refetch group before calling authorize
+* awsutils: use 3 decimal places in spot history prices
+* cluster: fix thread leak when running plugins
+* cluster: store cluster metadata in userdata/tags
+* cluster: dont launch master as spot when ``CLUSTER_SIZE=1``
+* cluster: reraise uncaught exceptions in run_plugins
+* cluster: fix instance filtering for default VPC
+* cluster: only clean-up placement groups in supported regions
+* clustersetup: ebs volume mounting improvements
+* clustersetup: raise exception if user's ``$HOME`` is owned by root
+* improve ebs volume device and partition detection
+* config: allow inline comments in the config file
+* config: support ``[vol]`` shortcut in config
+* config: document/warn where/when env overrides cfg
+* threadpool: clear the exceptions queue in wait()
+* node: fix Node.root_device_name for misconfigured AMIs
+* node: fix ~/.ssh ownership in generate_key_for_user
+* sge: Export ``$DRMAA_LIBRARY_PATH`` for Python DRMAA
+* cli: use logging module to log/show exceptions
+* cli: write header to sys.stderr
+* logger: move console logs from stderr to stdout
+* logger: output error messages to stderr
+* logger: remove in-memory log handler (memory-leak fix)
+* fix for DependencyViolation when deleting security group
+* replace group-name filter with instance.group-name
+* spothistory: show *current* spot price instead of oldest
+
+**resizevol/createvol**:
+
+* call e2fsck before resize2fs if needed
+* cleanup vol on failure in resize()
+* fix bug in _warn_about_volume_hosts
+* fix bug in sfdisk repartitioning
+* set default instance type to t1.micro for volume hosts
+* fix bug when cleaning up failed volumes
+* use force_spot_master when launching cluster
+
+**ebsimage/s3image**:
+
+* fetch root device from instance metadata
+* only wait for snapshot if root device is in bmap
+* show progress bar for CreateImage snapshot
+* remove ssh host keys in clean_private_data
+* use ec2.get_snapshot to fetch snapshots
+
+**loadbalance**:
+
+* collect all queue info from qstat
+* fix logic in SGEStats._count_tasks
+* fix node count in _eval_remove_node
+* get slot calculations from all.q
+* handle qacct error on fresh SGE install
+* improve qstat parsing
+* maintain a single instance of SGEStats
+* move static settings to __init__
+* remove bounds on interval and wait_time
+* remove estimated time to completion calcs
+* replace 'qlen > ts' condition in _eval_add_node
+* require positive ints for numeric options
+* take slots into account in _eval_add_node
+* update sge tests for latest parser changes
+* use # of nodes for max_nodes check (not exec hosts)
+* don't wait for cluster to stabilize to add a node when there are no slots
+* immediately add a node when jobs are in the queue and no slots exists
+
+**IPython plugin**:
+
+* Add section on engine restart + note on growing new engines
+* ipcluster: raise exception if IPython isnt installed
+* Better docstrings for the stop and restart plugins
+* Better packer configuration support + updated doc
+* Make it possible to configure a custom notebook folder
+* Make it possible to restart engine, better logs, make msgpack setup explicit
+* Open the controller ports for IPython 0.13.1
+* Use the cluster thread pool to start the engines on the nodes
+* Update the documentation according to tests done on 0.13.1
+
+.. _version-0.93.3:
+
+0.93.3
+======
+
+.. _v0933-news:
+
+News
+----
+Version 0.93.3 of StarCluster is a patch release that fixes several bugs. See
+the "Bug Fixes" section below for details.
+
+* Bumped boto dep to 2.3.0
+* Updated and improved default config template
+
+.. _v0933-fixes:
+
+Bug Fixes
+---------
+* sge: fix bug where master could never be an exec host even when toggling the
+  ``master_is_exec_host`` plugin setting (issue 89)
+* fix bug when setting custom SSH permission without ``cidr_ip`` (issue 91)
+* start-cmd: fix bug where ``refresh_interval`` is always ``None`` if
+  ``[global]`` is not defined in the config (issue 90)
+* dont allow ``cluster_user=root`` when validating cluster settings (issue 92)
+* fix another textwrap error with python 2.5
+
+.. _version-0.93.2:
+
+0.93.2
+======
+
+.. _v0932-news:
+
+News
+----
+Version 0.93.2 of StarCluster fixes several bugs and adds a couple new
+features. See the "Bug Fixes" section below for details.
+
+* Amazon recently announced a new instance type ``m1.medium`` which is now
+  supported. Amazon also enabled the m1.small and c1.medium instance types to
+  be compatible with both 32bit *and* 64bit AMIs now. StarCluster now supports
+  the new ``m1.medium`` instance type as well as the new changes to
+  ``m1.small`` and ``c1.medium``.
+* Switched from paramiko to actively maintained fork called `ssh` (1.7.13)
+* loadbalancer: ``--kill-master`` option renamed to ``--kill-cluster``
+* Bumped boto dep to 2.2.2
+* Bumped jinja dep to 2.6
+
+.. _v0932-features:
+
+Features
+--------
+* SGE setup code has been moved to a plugin that is executed by default (**no
+  configuration changes required**). This plugin supports an optional setting
+  ``master_is_exec_host`` which controls whether or not the master node
+  executes jobs. This is set to ``True`` by default. To change this you will
+  need to set ``disable_queue=True`` in your cluster config and then manually
+  define and add the SGE plugin in order to configure the new plugin's
+  settings. See :ref:`sge-plugin` for more details.
+* Added the following new options to ``addnode`` command: ``--image-id``,
+  ``--instance-type``, ``--availability-zone``, ``--bid``. Thanks to Dan Yamins
+  for his contributions. (issue 76)
+* New ``CreateUsers`` plugin that creates multiple cluster users and configures
+  passwordless SSH. Either number of users or a list of usernames can be
+  specified. Also has options to tar and download all SSH keys for generated
+  users. See :ref:`users-plugin` for more details.
+* Added -X option to ``sshmaster`` and ``sshnode`` commands for forwarding X11.
+  Can be used both when logging in interactively and when executing remote
+  commands.
+
+.. _v0932-fixes:
+
+Bug Fixes
+---------
+* catch `Garbage packet received` exception and warn users about incompatible
+  AMI
+* ``createvolume``: support new /dev/xvd* device names
+* fix textwrap error with python 2.5 (issue 85)
+* ``sshmaster``, ``sshnode``: load /etc/profile by default when executing
+  remote cmds
+* ``terminate``: handle Ctrl-D gracefully when prompting for input (issue 80)
+* ``terminate``: ignore keys when terminating manually
+* validate key_location is readable (issue 77)
+* relax validation constraints for running instances when using ``starcluster
+  start -x`` (issue 78)
+* fix cluster validation for `t1.micro` AMIs/instance types
+* ``loadbalance``: fix _get_stats when no exec hosts
+* ``loadbalance``: respect min_nodes when removing nodes (issue 75)
+* ``loadbalance``: fix -K option to kill cluster when queue is empty (issue 86)
+* ``loadbalance``: retry fetching stats 5x before failing (issue 65)
+* skip NFS exports setup when there are no worker nodes
+* sge: configure SGE profile on all nodes concurrently
+* sge: use qconf's -\*attr commands to update cluster config (replaced a bunch
+  of ugly code that parsed SGE's console output)
+* add Changelog to MANIFEST.in in order to include Changelog in future release
+  dists
+
+.. _version-0.93.1:
+
+0.93.1
+======
+
+.. _v0931-news:
+
+News
+----
+.. warning:: It is recommended that you upgrade as soon as possible.
+
+Version 0.93.1 of StarCluster is largely a patch release that fixes several
+bugs. See the "Bug Fixes" section below for details.
+
+
+Also, the ``put`` and ``get`` commands have been marked stable which means they
+no longer require ``ENABLE_EXPERIMENTAL=True`` in the config in order to use
+them.
+
+.. _v0931-features:
+
+Features
+--------
+* Added sys.argv to crash reports for better details when things go wrong
+* Implemented on_add_node and on_remove_node for TMUX plugin to add/remove
+  nodes from the TMUX control-center sessions for both ``root`` and
+  ``CLUSTER_USER``
+* Implemented on_add_node for the Ubuntu package installer plugin
+  (``pkginstaller``) to ensure new nodes also install the required packages
+* Implemented on_add_node for the MPICH2 plugin to ensure new nodes are
+  configured for MPICH2 and also added to the hosts file. Moved the MPICH2
+  hosts file to an NFS-shared location (``/home/mpich2.hosts``) for faster
+  configuration
+* Implemented on_add_node for the Xvfb plugin that installs and runs Xvfb on
+  newly added nodes
+
+.. _v0931-fixes:
+
+Bug Fixes
+---------
+* Fixed major NFS bug in ``addnode`` command where ``/etc/exports`` was being
+  wiped each time a new node was added. This caused the last-to-be-added node
+  to be the only node correctly configured for NFS in the entire cluster.
+* Updated all plugins which subclass DefaultClusterSetup to implement
+  on_add_node and on_remove_node regardless of whether or not they actually use
+  them to avoid the 'default' plugin's implementation being incorrectly called
+  multiple times by plugins when adding/removing nodes using the ``addnode``
+  and ``removenode`` commands
+* Fixed string formatting bug in Condor plugin
+
 .. _version-0.93:
 
 0.93
@@ -191,13 +504,13 @@ News
 
 You can find the new docs for 0.92rc1 here:
 
-http://web.mit.edu/stardev/cluster/docs/0.92rc1/
+http://star.mit.edu/cluster/docs/0.92rc1/
 
 NOTE: these docs are still very much a work in progress. If anyone is
 interested in helping to improve the docs, please fork the project on github
 and submit pull requests. Here's a guide to get you started:
 
-http://web.mit.edu/stardev/cluster/docs/0.92rc1/contribute.html
+http://star.mit.edu/cluster/docs/0.92rc1/contribute.html
 
 Please upgrade at your leisure, test the new release candidate, and submit any
 bug reports preferably on StarCluster's github issue tracker or this mailing
@@ -263,7 +576,7 @@ Features
   using a global -z option. For example::
 
     $ starcluster -r eu-west-1 listclusters
-    StarCluster - (http://web.mit.edu/starcluster) (v. 0.92rc1)
+    StarCluster - (http://star.mit.edu/cluster) (v. 0.92rc1)
     Software Tools for Academics and Researchers (STAR)
     Please submit bug reports to starcluster@mit.edu
 

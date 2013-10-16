@@ -1,8 +1,25 @@
-from starcluster.clustersetup import DefaultClusterSetup
+# Copyright 2009-2013 Justin Riley
+#
+# This file is part of StarCluster.
+#
+# StarCluster is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Lesser General Public License as published by the Free
+# Software Foundation, either version 3 of the License, or (at your option) any
+# later version.
+#
+# StarCluster is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+# FOR A PARTICULAR PURPOSE. See the GNU Lesser General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Lesser General Public License
+# along with StarCluster. If not, see <http://www.gnu.org/licenses/>.
+
+from starcluster import clustersetup
 from starcluster.logger import log
 
 
-class XvfbSetup(DefaultClusterSetup):
+class XvfbSetup(clustersetup.DefaultClusterSetup):
     """
     Installs, configures, and sets up an Xvfb server
     (thanks to Adam Marsh for his contribution)
@@ -25,10 +42,18 @@ class XvfbSetup(DefaultClusterSetup):
         for node in nodes:
             self.pool.simple_job(self._launch_xvfb, (node), jobid=node.alias)
         self.pool.wait(numtasks=len(nodes))
-        #self._terminate(nodes)
 
     def _terminate(self, nodes):
         for node in nodes:
             self.pool.simple_job(node.ssh.execute, ('pkill Xvfb'),
                                  jobid=node.alias)
         self.pool.wait(numtasks=len(nodes))
+
+    def on_add_node(self, new_node, nodes, master, user, user_shell, volumes):
+        log.info("Installing Xvfb on %s" % new_node.alias)
+        self._install_xvfb(new_node)
+        log.info("Launching Xvfb Server on %s" % new_node.alias)
+        self._launch_xvfb(new_node)
+
+    def on_remove_node(self, node, nodes, master, user, user_shell, volumes):
+        raise NotImplementedError('on_remove_node method not implemented')

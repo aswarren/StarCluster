@@ -1,17 +1,33 @@
-#!/usr/bin/env python
-import os
-import pwd
-import grp
+# Copyright 2009-2013 Justin Riley
+#
+# This file is part of StarCluster.
+#
+# StarCluster is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Lesser General Public License as published by the Free
+# Software Foundation, either version 3 of the License, or (at your option) any
+# later version.
+#
+# StarCluster is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+# FOR A PARTICULAR PURPOSE. See the GNU Lesser General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Lesser General Public License
+# along with StarCluster. If not, see <http://www.gnu.org/licenses/>.
+
+import re
 import time
 import stat
 import base64
 import posixpath
+import subprocess
 
-from starcluster import ssh
 from starcluster import utils
 from starcluster import static
+from starcluster import sshutils
 from starcluster import awsutils
 from starcluster import managers
+from starcluster import userdata
 from starcluster import exception
 from starcluster.logger import log
 
@@ -20,16 +36,11 @@ class NodeManager(managers.Manager):
     """
     Manager class for Node objects
     """
-    def ssh_to_node(self, node_id, user='root', command=None):
+    def ssh_to_node(self, node_id, user='root', command=None,
+                    forward_x11=False, forward_agent=False):
         node = self.get_node(node_id, user=user)
-        if command:
-            current_user = node.ssh.get_current_user()
-            node.ssh.switch_user(user)
-            node.ssh.execute(command, silent=False)
-            node.ssh.switch_user(current_user)
-            return node.ssh.get_last_status()
-        else:
-            node.shell(user=user)
+        return node.shell(user=user, command=command, forward_x11=forward_x11,
+                          forward_agent=forward_agent)
 
     def get_node(self, node_id, user='root'):
         """Factory for Node class"""
@@ -54,8 +65,8 @@ class Node(object):
     This class represents a single compute node in a StarCluster.
 
     It contains all useful metadata for the node such as the internal/external
-    hostnames, ips, etc as well as a paramiko ssh object for executing
-    commands, creating/modifying files on the node.
+    hostnames, ips, etc. as well as an ssh object for executing commands,
+    creating/modifying files on the node.
 
     'instance' arg must be an instance of boto.ec2.instance.Instance
 
@@ -70,8 +81,8 @@ class Node(object):
     """
     def __init__(self, instance, key_location, alias=None, user='root'):
         self.instance = instance
-        self.ec2 = awsutils.EasyEC2(None, None)
-        self.ec2._conn = instance.connection
+        self.ec2 = awsutils.EasyEC2(instance.connection.aws_access_key_id,
+                                    instance.connection.aws_secret_access_key)
         self.key_location = key_location
         self.user = user
         self._alias = alias
@@ -79,6 +90,7 @@ class Node(object):
         self._ssh = None
         self._num_procs = None
         self._memory = None
+        self._user_data = None
 
     def __repr__(self):
         return '<Node: %s (%s)>' % (self.alias, self.id)
@@ -99,6 +111,21 @@ class Node(object):
                 time.sleep(5)
 
     @property
+    def user_data(self):
+        if not self._user_data:
+            try:
+                raw = self._get_user_data()
+                self._user_data = userdata.unbundle_userdata(raw)
+            except IOError, e:
+                parent_cluster = self.parent_cluster
+                if self.parent_cluster:
+                    raise exception.IncompatibleCluster(parent_cluster)
+                else:
+                    raise exception.BaseException(
+                        "Error occurred unbundling userdata: %s" % e)
+        return self._user_data
+
+    @property
     def alias(self):
         """
         Fetches the node's alias stored in a tag from either the instance
@@ -108,24 +135,55 @@ class Node(object):
         if not self._alias:
             alias = self.tags.get('alias')
             if not alias:
-                user_data = self._get_user_data(tries=5)
-                aliases = user_data.split('|')
+                aliasestxt = self.user_data.get(static.UD_ALIASES_FNAME)
+                aliases = aliasestxt.splitlines()[2:]
                 index = self.ami_launch_index
                 try:
                     alias = aliases[index]
                 except IndexError:
-                    log.debug(
-                        "invalid user_data: %s (index: %d)" % (aliases, index))
                     alias = None
+                    log.debug("invalid aliases file in user_data:\n%s" %
+                              aliasestxt)
                 if not alias:
                     raise exception.BaseException(
                         "instance %s has no alias" % self.id)
                 self.add_tag('alias', alias)
-            name = self.tags.get('Name')
-            if not name:
+            if not self.tags.get('Name'):
                 self.add_tag('Name', alias)
             self._alias = alias
         return self._alias
+
+    def get_plugins(self):
+        plugstxt = self.user_data.get(static.UD_PLUGINS_FNAME)
+        payload = plugstxt.split('\n', 2)[2]
+        plugins_metadata = utils.decode_uncompress_load(payload)
+        plugs = []
+        for klass, args, kwargs in plugins_metadata:
+            mod_path, klass_name = klass.rsplit('.', 1)
+            try:
+                mod = __import__(mod_path, fromlist=[klass_name])
+                plug = getattr(mod, klass_name)(*args, **kwargs)
+            except SyntaxError, e:
+                raise exception.PluginSyntaxError(
+                    "Plugin %s (%s) contains a syntax error at line %s" %
+                    (klass_name, e.filename, e.lineno))
+            except ImportError, e:
+                raise exception.PluginLoadError(
+                    "Failed to import plugin %s: %s" %
+                    (klass_name, e[0]))
+            except Exception as exc:
+                log.error("Error occured:", exc_info=True)
+                raise exception.PluginLoadError(
+                    "Failed to load plugin %s with "
+                    "the following error: %s - %s" %
+                    (klass_name, exc.__class__.__name__, exc.message))
+            plugs.append(plug)
+        return plugs
+
+    def get_volumes(self):
+        volstxt = self.user_data.get(static.UD_VOLUMES_FNAME)
+        payload = volstxt.split('\n', 2)[2]
+        return utils.decode_uncompress_load(payload)
 
     def _remove_all_tags(self):
         tags = self.tags.keys()[:]
@@ -145,7 +203,7 @@ class Node(object):
     @property
     def groups(self):
         if not self._groups:
-            groups = map(lambda x: x.id, self.instance.groups)
+            groups = map(lambda x: x.name, self.instance.groups)
             self._groups = self.ec2.get_all_security_groups(groupnames=groups)
         return self._groups
 
@@ -153,6 +211,13 @@ class Node(object):
     def cluster_groups(self):
         sg_prefix = static.SECURITY_GROUP_PREFIX
         return filter(lambda x: x.name.startswith(sg_prefix), self.groups)
+
+    @property
+    def parent_cluster(self):
+        try:
+            return self.cluster_groups[0]
+        except IndexError:
+            pass
 
     @property
     def num_processors(self):
@@ -224,7 +289,7 @@ class Node(object):
         try:
             return int(self.instance.ami_launch_index)
         except TypeError:
-            log.error("instance %s (state: %s) has no ami_launch_index" % \
+            log.error("instance %s (state: %s) has no ami_launch_index" %
                       (self.id, self.state))
             log.error("returning 0 as ami_launch_index...")
             return 0
@@ -258,8 +323,36 @@ class Node(object):
         return self.instance.placement
 
     @property
+    def region(self):
+        return self.instance.region
+
+    @property
     def root_device_name(self):
-        return self.instance.root_device_name
+        root_dev = self.instance.root_device_name
+        bmap = self.block_device_mapping
+        if bmap and root_dev not in bmap and self.is_ebs_backed():
+            # Hack for misconfigured AMIs (e.g. CentOS 6.3 Marketplace) These
+            # AMIs have root device name set to /dev/sda1 but no /dev/sda1 in
+            # block device map - only /dev/sda. These AMIs somehow magically
+            # work so check if /dev/sda exists and return that instead to
+            # prevent detach_external_volumes() from trying to detach the root
+            # volume on these AMIs.
+            log.warn("Root device %s is not in the block device map" %
+                     root_dev)
+            log.warn("This means the AMI was registered with either "
+                     "an incorrect root device name or an incorrect block "
+                     "device mapping")
+            sda, sda1 = '/dev/sda', '/dev/sda1'
+            if root_dev == sda1:
+                log.info("Searching for possible root device: %s" % sda)
+                if sda in self.block_device_mapping:
+                    log.warn("Found '%s' - assuming its the real root device" %
+                             sda)
+                    root_dev = sda
+                else:
+                    log.warn("Device %s isn't in the block device map either" %
+                             sda)
+        return root_dev
 
     @property
     def root_device_type(self):
@@ -317,8 +410,8 @@ class Node(object):
             key = name
             if key_by_uid:
                 key = uid
-            user_map[key] = pwd.struct_passwd([name, passwd, uid, gid,
-                                               gecos, home, shell])
+            user_map[key] = utils.struct_passwd([name, passwd, uid, gid, gecos,
+                                                 home, shell])
         return user_map
 
     def getgrgid(self, gid):
@@ -398,12 +491,13 @@ class Node(object):
         ssh_folder = posixpath.join(home_folder, '.ssh')
         if not self.ssh.isdir(ssh_folder):
             self.ssh.mkdir(ssh_folder)
+        self.ssh.chown(user.pw_uid, user.pw_gid, ssh_folder)
         private_key = posixpath.join(ssh_folder, 'id_rsa')
         public_key = private_key + '.pub'
         authorized_keys = posixpath.join(ssh_folder, 'authorized_keys')
         key_exists = self.ssh.isfile(private_key)
         if key_exists and not ignore_existing:
-            log.info("Using existing key: %s" % private_key)
+            log.debug("Using existing key: %s" % private_key)
             key = self.ssh.load_remote_rsa_key(private_key)
         else:
             key = self.ssh.generate_rsa_key()
@@ -454,22 +548,23 @@ class Node(object):
         username - name of the user to add to known hosts for
         nodes - the nodes to add to the user's known hosts file
         add_self - add this Node to known_hosts in addition to nodes
-
-        NOTE: this node's hostname will also be added to the known_hosts
-        file
         """
         user = self.getpwnam(username)
         known_hosts_file = posixpath.join(user.pw_dir, '.ssh', 'known_hosts')
-        self.remove_from_known_hosts(username, nodes)
         khosts = []
+        if add_self and self not in nodes:
+            nodes.append(self)
+        self.remove_from_known_hosts(username, nodes)
         for node in nodes:
             server_pkey = node.ssh.get_server_public_key()
-            khosts.append(' '.join([node.alias, server_pkey.get_name(),
-                                    base64.b64encode(str(server_pkey))]))
-        if add_self and self not in nodes:
-            server_pkey = self.ssh.get_server_public_key()
-            khosts.append(' '.join([self.alias, server_pkey.get_name(),
-                                    base64.b64encode(str(server_pkey))]))
+            node_names = {}.fromkeys([node.alias, node.private_dns_name,
+                                      node.private_dns_name_short],
+                                     node.private_ip_address)
+            node_names[node.public_dns_name] = node.ip_address
+            for name, ip in node_names.items():
+                name_ip = "%s,%s" % (name, ip)
+                khosts.append(' '.join([name_ip, server_pkey.get_name(),
+                                        base64.b64encode(str(server_pkey))]))
         khostsf = self.ssh.remote_file(known_hosts_file, 'a')
         khostsf.write('\n'.join(khosts) + '\n')
         khostsf.chown(user.pw_uid, user.pw_gid)
@@ -482,7 +577,10 @@ class Node(object):
         """
         user = self.getpwnam(username)
         known_hosts_file = posixpath.join(user.pw_dir, '.ssh', 'known_hosts')
-        hostnames = map(lambda n: n.alias, nodes)
+        hostnames = []
+        for node in nodes:
+            hostnames += [node.alias, node.private_dns_name,
+                          node.private_dns_name_short, node.public_dns_name]
         if self.ssh.isfile(known_hosts_file):
             regex = '|'.join(hostnames)
             self.ssh.remove_lines_from_file(known_hosts_file, regex)
@@ -558,6 +656,8 @@ class Node(object):
                                   export_paths=['/home', '/opt/sge6'])
         """
         # setup /etc/exports
+        log.info("Configuring NFS exports path(s):\n%s" %
+                 ' '.join(export_paths))
         nfs_export_settings = "(async,no_root_squash,no_subtree_check,rw)"
         etc_exports = self.ssh.remote_file('/etc/exports', 'r')
         contents = etc_exports.read()
@@ -570,7 +670,7 @@ class Node(object):
                 if export_line not in contents:
                     etc_exports.write(export_line)
         etc_exports.close()
-        self.ssh.execute('exportfs -a')
+        self.ssh.execute('exportfs -fra')
 
     def stop_exporting_fs_to_nodes(self, nodes):
         """
@@ -583,14 +683,15 @@ class Node(object):
         """
         regex = '|'.join(map(lambda x: x.alias, nodes))
         self.ssh.remove_lines_from_file('/etc/exports', regex)
-        self.ssh.execute('exportfs -a')
+        self.ssh.execute('exportfs -fra')
 
     def start_nfs_server(self):
+        log.info("Starting NFS server on %s" % self.alias)
         self.ssh.execute('/etc/init.d/portmap start')
         self.ssh.execute('mount -t rpc_pipefs sunrpc /var/lib/nfs/rpc_pipefs/',
                          ignore_exit_status=True)
         self.ssh.execute('/etc/init.d/nfs start')
-        self.ssh.execute('/usr/sbin/exportfs -r')
+        self.ssh.execute('/usr/sbin/exportfs -fra')
 
     def mount_nfs_shares(self, server_node, remote_paths):
         """
@@ -603,12 +704,24 @@ class Node(object):
         # TODO: move this fix for xterm somewhere else
         self.ssh.execute('mount -t devpts none /dev/pts',
                          ignore_exit_status=True)
+        mount_map = self.get_mount_map()
+        mount_paths = []
+        for path in remote_paths:
+            network_device = "%s:%s" % (server_node.alias, path)
+            if network_device in mount_map:
+                mount_path, typ, options = mount_map.get(network_device)
+                log.debug('nfs share %s already mounted to %s on '
+                          'node %s, skipping...' %
+                          (network_device, mount_path, self.alias))
+            else:
+                mount_paths.append(path)
+        remote_paths = mount_paths
         remote_paths_regex = '|'.join(map(lambda x: x.center(len(x) + 2),
                                           remote_paths))
         self.ssh.remove_lines_from_file('/etc/fstab', remote_paths_regex)
         fstab = self.ssh.remote_file('/etc/fstab', 'a')
         for path in remote_paths:
-            fstab.write('%s:%s %s nfs user,rw,exec,noauto 0 0\n' %
+            fstab.write('%s:%s %s nfs vers=3,user,rw,exec,noauto 0 0\n' %
                         (server_node.alias, path, path))
         fstab.close()
         for path in remote_paths:
@@ -624,6 +737,41 @@ class Node(object):
             mount_map[dev] = [path, fstype, options]
         return mount_map
 
+    def get_device_map(self):
+        """
+        Returns a dictionary mapping devices->(# of blocks) based on
+        'fdisk -l' and /proc/partitions
+        """
+        dev_regex = '/dev/[A-Za-z0-9/]+'
+        r = re.compile('Disk (%s):' % dev_regex)
+        fdiskout = '\n'.join(self.ssh.execute("fdisk -l 2>/dev/null"))
+        proc_parts = '\n'.join(self.ssh.execute("cat /proc/partitions"))
+        devmap = {}
+        for dev in r.findall(fdiskout):
+            short_name = dev.replace('/dev/', '')
+            r = re.compile("(\d+)\s+%s(?:\s+|$)" % short_name)
+            devmap[dev] = int(r.findall(proc_parts)[0])
+        return devmap
+
+    def get_partition_map(self, device=None):
+        """
+        Returns a dictionary mapping partitions->(start, end, blocks, id) based
+        on 'fdisk -l'
+        """
+        fdiskout = '\n'.join(self.ssh.execute("fdisk -l %s 2>/dev/null" %
+                                              (device or '')))
+        part_regex = '/dev/[A-Za-z0-9/]+'
+        r = re.compile('(%s)\s+\*?\s+'
+                       '(\d+)(?:[-+])?\s+'
+                       '(\d+)(?:[-+])?\s+'
+                       '(\d+)(?:[-+])?\s+'
+                       '([\da-fA-F][\da-fA-F]?)' % part_regex)
+        partmap = {}
+        for match in r.findall(fdiskout):
+            part, start, end, blocks, sys_id = match
+            partmap[part] = [int(start), int(end), int(blocks), sys_id]
+        return partmap
+
     def mount_device(self, device, path):
         """
         Mount device to path
@@ -631,7 +779,7 @@ class Node(object):
         self.ssh.remove_lines_from_file('/etc/fstab',
                                         path.center(len(path) + 2))
         master_fstab = self.ssh.remote_file('/etc/fstab', mode='a')
-        master_fstab.write("%s %s auto noauto,defaults 0 0\n" % \
+        master_fstab.write("%s %s auto noauto,defaults 0 0\n" %
                            (device, path))
         master_fstab.close()
         if not self.ssh.path_exists(path):
@@ -688,8 +836,9 @@ class Node(object):
         attached_vols.update(self.block_device_mapping)
         if self.is_ebs_backed():
             # exclude the root device from the list
-            if self.root_device_name in attached_vols:
-                attached_vols.pop(self.root_device_name)
+            root_dev = self.root_device_name
+            if root_dev in attached_vols:
+                attached_vols.pop(root_dev)
         return attached_vols
 
     def detach_external_volumes(self):
@@ -714,7 +863,7 @@ class Node(object):
         vol_id = root_vol.volume_id
         vol = self.ec2.get_volume(vol_id)
         vol.detach()
-        while vol.update() != 'availabile':
+        while vol.update() != 'available':
             time.sleep(5)
         log.info("Deleting node %s's root volume" % self.alias)
         root_vol.delete()
@@ -795,6 +944,9 @@ class Node(object):
         will also destroy the node's EBS root device. Puts this node
         into a 'terminated' state.
         """
+        if self.spot_id:
+            log.info("Canceling spot request %s" % self.spot_id)
+            self.get_spot_request().cancel()
         log.info("Terminating node: %s (%s)" % (self.alias, self.id))
         return self.instance.terminate()
 
@@ -802,7 +954,7 @@ class Node(object):
         """
         Shutdown this instance. This method will terminate traditional
         instance-store instances and stop EBS-backed instances
-        (ie not destroy EBS root dev)
+        (i.e. not destroy EBS root dev)
         """
         if self.is_stoppable():
             self.stop()
@@ -821,6 +973,10 @@ class Node(object):
         except exception.SSHError:
             return False
 
+    def wait(self, interval=30):
+        while not self.is_up():
+            time.sleep(interval)
+
     def is_up(self):
         if self.update() != 'running':
             return False
@@ -828,14 +984,14 @@ class Node(object):
             return False
         if self.private_ip_address is None:
             log.debug("instance %s has no private_ip_address" % self.id)
-            log.debug(("attempting to determine private_ip_address for" + \
-                       "instance %s") % self.id)
+            log.debug("attempting to determine private_ip_address for "
+                      "instance %s" % self.id)
             try:
-                private_ip = self.ssh.execute((
-                    'python -c ' + \
-                    '"import socket; print socket.gethostbyname(\'%s\')"') % \
+                private_ip = self.ssh.execute(
+                    'python -c '
+                    '"import socket; print socket.gethostbyname(\'%s\')"' %
                     self.private_dns_name)[0].strip()
-                log.debug("determined instance %s's private ip to be %s" % \
+                log.debug("determined instance %s's private ip to be %s" %
                           (self.id, private_ip))
                 self.instance.private_ip_address = private_ip
             except Exception, e:
@@ -851,12 +1007,13 @@ class Node(object):
     @property
     def ssh(self):
         if not self._ssh:
-            self._ssh = ssh.SSHClient(self.instance.dns_name,
-                                      username=self.user,
-                                      private_key=self.key_location)
+            self._ssh = sshutils.SSHClient(self.instance.dns_name,
+                                           username=self.user,
+                                           private_key=self.key_location)
         return self._ssh
 
-    def shell(self, user=None):
+    def shell(self, user=None, forward_x11=False, forward_agent=False,
+              command=None):
         """
         Attempts to launch an interactive shell by first trying the system's
         ssh client. If the system does not have the ssh command it falls back
@@ -870,6 +1027,7 @@ class Node(object):
             label = 'instance'
             if alias == "master":
                 label = "master"
+                alias = "node"
             elif alias:
                 label = "node"
             instance_id = alias or self.id
@@ -877,13 +1035,32 @@ class Node(object):
                                                label=label)
         user = user or self.user
         if utils.has_required(['ssh']):
-            log.debug("using system's ssh client")
-            ssh_cmd = static.SSH_TEMPLATE % (self.key_location, user,
-                                             self.dns_name)
+            log.debug("Using native OpenSSH client")
+            sshopts = '-i %s' % self.key_location
+            if forward_x11:
+                sshopts += ' -Y'
+            if forward_agent:
+                sshopts += ' -A'
+            ssh_cmd = static.SSH_TEMPLATE % dict(opts=sshopts, user=user,
+                                                 host=self.dns_name)
+            if command:
+                command = "'source /etc/profile && %s'" % command
+                ssh_cmd = ' '.join([ssh_cmd, command])
             log.debug("ssh_cmd: %s" % ssh_cmd)
-            os.system(ssh_cmd)
+            return subprocess.call(ssh_cmd, shell=True)
         else:
-            log.debug("using pure-python ssh client")
+            log.debug("Using Pure-Python SSH client")
+            if forward_x11:
+                log.warn("X11 Forwarding not available in Python SSH client")
+            if forward_agent:
+                log.warn("Authentication agent forwarding not available in " +
+                         "Python SSH client")
+            if command:
+                orig_user = self.ssh.get_current_user()
+                self.ssh.switch_user(user)
+                self.ssh.execute(command, silent=False)
+                self.ssh.switch_user(orig_user)
+                return self.ssh.get_last_status()
             self.ssh.interactive_shell(user=user)
 
     def get_hosts_entry(self):
@@ -891,6 +1068,65 @@ class Node(object):
         etc_hosts_line = "%(INTERNAL_IP)s %(INTERNAL_ALIAS)s"
         etc_hosts_line = etc_hosts_line % self.network_names
         return etc_hosts_line
+
+    def apt_command(self, cmd):
+        """
+        Run an apt-get command with all the necessary options for
+        non-interactive use (DEBIAN_FRONTEND=interactive, -y, --force-yes, etc)
+        """
+        dpkg_opts = "Dpkg::Options::='--force-confnew'"
+        cmd = "apt-get -o %s -y --force-yes %s" % (dpkg_opts, cmd)
+        cmd = "DEBIAN_FRONTEND='noninteractive' " + cmd
+        self.ssh.execute(cmd)
+
+    def apt_install(self, pkgs):
+        """
+        Install a set of packages via apt-get.
+
+        pkgs is a string that contains one or more packages separated by a
+        space
+        """
+        self.apt_command('install %s' % pkgs)
+
+    def yum_command(self, cmd):
+        """
+        Run a yum command with all necessary options for non-interactive use.
+        "-d 0 -e 0 -y"
+        """
+        yum_opts = ['-d', '0', '-e', '0', '-y']
+        cmd = "yum " + " ".join(yum_opts) + " " + cmd
+        self.ssh.execute(cmd)
+
+    def yum_install(self, pkgs):
+        """
+        Install a set of packages via yum.
+
+        pkgs is a string that contains one or more packages separated by a
+        space
+        """
+        self.yum_command('install %s' % pkgs)
+
+    @property
+    def package_provider(self):
+        """
+        In order to determine which packaging system to use, check to see if
+        /usr/bin/apt exists on the node, and use apt if it exists. Otherwise
+        test to see if /usr/bin/yum exists and use that.
+        """
+        if self.ssh.isfile('/usr/bin/apt'):
+            return "apt"
+        elif self.ssh.isfile('/usr/bin/yum'):
+            return "yum"
+
+    def package_install(self, pkgs):
+        """
+        Provides a declarative install packages on systems, regardless
+        of the system's packging type (apt/yum).
+        """
+        if self.package_provider == "apt":
+            self.apt_install(pkgs)
+        elif self.package_provider == "yum":
+            self.yum_install(pkgs)
 
     def __del__(self):
         if self._ssh:

@@ -1,16 +1,26 @@
-"""
-ssh.py
-Friendly Python SSH2 interface.
-From http://commandline.org.uk/code/
-License: LGPL
-modified by justin riley (justin.t.riley@gmail.com)
-"""
+# Copyright 2009-2013 Justin Riley
+#
+# This file is part of StarCluster.
+#
+# StarCluster is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Lesser General Public License as published by the Free
+# Software Foundation, either version 3 of the License, or (at your option) any
+# later version.
+#
+# StarCluster is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+# FOR A PARTICULAR PURPOSE. See the GNU Lesser General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Lesser General Public License
+# along with StarCluster. If not, see <http://www.gnu.org/licenses/>.
 
 import os
 import re
 import sys
 import stat
 import glob
+import atexit
 import string
 import socket
 import fnmatch
@@ -31,7 +41,7 @@ try:
 except ImportError:
     HAS_TERMIOS = False
 
-from starcluster import scp
+from starcluster.sshutils import scp
 from starcluster import exception
 from starcluster import progressbar
 from starcluster.logger import log
@@ -69,6 +79,7 @@ class SSHClient(object):
             raise exception.SSHNoCredentialsError()
         self._glob = SSHGlob(self)
         self.__last_status = None
+        atexit.register(self.close)
 
     def load_private_key(self, private_key, private_key_pass=None):
         # Use Private Key.
@@ -117,6 +128,13 @@ class SSHClient(object):
             raise exception.SSHError(str(e))
         self.close()
         self._transport = transport
+        try:
+            assert self.sftp is not None
+        except paramiko.SFTPError, e:
+            if 'Garbage packet received' in e:
+                log.debug("Garbage packet received", exc_info=True)
+                raise exception.SSHAccessDeniedViaAuthKeys(username)
+            raise
         return self
 
     @property
@@ -183,7 +201,7 @@ class SSHClient(object):
     @property
     def scp(self):
         """Initialize the SCP client."""
-        if not self._scp:
+        if not self._scp or not self._scp.transport.is_active():
             log.debug("creating scp connection")
             self._scp = scp.SCPClient(self.transport,
                                       progress=self._file_transfer_progress)
@@ -313,27 +331,23 @@ class SSHClient(object):
         except IOError:
             return False
 
-    def chown(self, uid, gid, remote_file):
+    def chown(self, uid, gid, remote_path):
         """
-        Apply permissions (mode) to remote_file
+        Set user (uid) and group (gid) owner for remote_path
         """
-        f = self.remote_file(remote_file, 'r')
-        f.chown(uid, gid, remote_file)
-        f.close()
+        return self.sftp.chown(remote_path, uid, gid)
 
-    def chmod(self, mode, remote_file):
+    def chmod(self, mode, remote_path):
         """
-        Apply permissions (mode) to remote_file
+        Apply permissions (mode) to remote_path
         """
-        f = self.remote_file(remote_file, 'r')
-        f.chmod(mode)
-        f.close()
+        return self.sftp.chmod(remote_path, mode)
 
     def ls(self, path):
         """
         Return a list containing the names of the entries in the remote path.
         """
-        return [os.path.join(path, f) for f in self.sftp.listdir(path)]
+        return [posixpath.join(path, f) for f in self.sftp.listdir(path)]
 
     def glob(self, pattern):
         return self._glob.glob(pattern)
@@ -436,7 +450,7 @@ class SSHClient(object):
                 break
         self.scp.put(localpaths, remote_path=remotepath, recursive=recursive)
 
-    def execute_async(self, command, source_profile=False):
+    def execute_async(self, command, source_profile=True):
         """
         Executes a remote command so that it continues running even after this
         SSH connection closes. The remote process will be put into the
@@ -449,7 +463,7 @@ class SSHClient(object):
     def get_last_status(self):
         return self.__last_status
 
-    def get_status(self, command, source_profile=False):
+    def get_status(self, command, source_profile=True):
         """
         Execute a remote command and return the exit status
         """
@@ -462,7 +476,7 @@ class SSHClient(object):
 
     def _get_output(self, channel, silent=True, only_printable=False):
         """
-        Returns the stdout/stderr output from a paramiko channel as a list of
+        Returns the stdout/stderr output from a ssh channel as a list of
         strings (non-interactive only)
         """
         #stdin = channel.makefile('wb', -1)
@@ -482,7 +496,7 @@ class SSHClient(object):
                     print line,
             for line in stderr.readlines():
                 output.append(line)
-                print line
+                print line,
         if only_printable:
             output = map(lambda line: ''.join(c for c in line if c in
                                               string.printable), output)
@@ -491,22 +505,23 @@ class SSHClient(object):
 
     def execute(self, command, silent=True, only_printable=False,
                 ignore_exit_status=False, log_output=True, detach=False,
-                source_profile=False):
+                source_profile=True, raise_on_failure=True):
         """
         Execute a remote command and return stdout/stderr
 
         NOTE: this function blocks until the process finishes
 
         kwargs:
-        silent - do not log output to console
+        silent - don't print the command's output to the console
         only_printable - filter the command's output to allow only printable
-                        characters
+                         characters
         ignore_exit_status - don't warn about non-zero exit status
-        log_output - log output to debug file
+        log_output - log all remote output to the debug file
         detach - detach the remote process so that it continues to run even
                  after the SSH connection closes (does NOT return output or
                  check for non-zero exit status if detach=True)
         source_profile - if True prefix the command with "source /etc/profile"
+        raise_on_failure - raise exception.SSHError if command fails
         returns List of output lines
         """
         channel = self.transport.open_session()
@@ -520,20 +535,33 @@ class SSHClient(object):
             return
         if source_profile:
             command = "source /etc/profile && %s" % command
+        log.debug("executing remote command: %s" % command)
         channel.exec_command(command)
         output = self._get_output(channel, silent=silent,
                                   only_printable=only_printable)
         exit_status = channel.recv_exit_status()
         self.__last_status = exit_status
+        out_str = '\n'.join(output)
         if exit_status != 0:
-            msg = "command '%s' failed with status %d" % (command, exit_status)
-            if not ignore_exit_status:
-                log.error(msg)
+            msg = "remote command '%s' failed with status %d"
+            msg %= (command, exit_status)
+            if log_output:
+                msg += ":\n%s" % out_str
             else:
-                log.debug(msg)
-        if log_output:
-            for line in output:
-                log.debug(line.strip())
+                msg += " (no output log requested)"
+            if not ignore_exit_status:
+                if raise_on_failure:
+                    raise exception.RemoteCommandFailed(
+                        msg, command, exit_status, out_str)
+                else:
+                    log.error(msg)
+            else:
+                log.debug("(ignored) " + msg)
+        else:
+            if log_output:
+                log.debug("output of '%s':\n%s" % (command, out_str))
+            else:
+                log.debug("output of '%s' has been hidden" % command)
         return output
 
     def has_required(self, progs):
@@ -602,18 +630,13 @@ class SSHClient(object):
     def interactive_shell(self, user='root'):
         orig_user = self.get_current_user()
         self.switch_user(user)
-        try:
-            chan = self._invoke_shell()
-            log.info('Starting interactive shell...')
-            if HAS_TERMIOS:
-                self._posix_shell(chan)
-            else:
-                self._windows_shell(chan)
-            chan.close()
-        except Exception, e:
-            import traceback
-            print '*** Caught exception: %s: %s' % (e.__class__, e)
-            traceback.print_exc()
+        chan = self._invoke_shell()
+        log.info('Starting Pure-Python SSH shell...')
+        if HAS_TERMIOS:
+            self._posix_shell(chan)
+        else:
+            self._windows_shell(chan)
+        chan.close()
         self.switch_user(orig_user)
 
     def _posix_shell(self, chan):
@@ -745,7 +768,7 @@ class SSHGlob(object):
             #dirname = unicode(dirname, encoding)
             dirname = unicode(dirname, 'UTF-8')
         try:
-            names = [os.path.basename(n) for n in self.ssh.ls(dirname)]
+            names = [posixpath.basename(n) for n in self.ssh.ls(dirname)]
         except os.error:
             return []
         if pattern[0] != '.':

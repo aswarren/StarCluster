@@ -1,9 +1,10 @@
-######################################################
-Running Remote Commands on a Cluster from Command Line
-######################################################
+#########################################
+Running Remote Commands from Command Line
+#########################################
 StarCluster's **sshmaster**, **sshnode**, and **sshinstance** commands now
 support executing remote commands on a cluster node without logging in
-interactively. To do so simply pass the command you wish to run remotely as an
+interactively. This is especially useful for users looking to script these
+commands. To do so simply pass the command you wish to run remotely as an
 additional quoted argument to any of the **sshmaster**, **sshnode**, and
 **sshinstance** commands.
 
@@ -11,7 +12,7 @@ For example, to check which hosts are listed in the master node's
 ``/etc/hosts`` file::
 
     $ starcluster sshmaster mycluster 'cat /etc/hosts'
-    StarCluster - (http://web.mit.edu/starcluster)
+    StarCluster - (http://star.mit.edu/cluster)
     Software Tools for Academics and Researchers (STAR)
     Please submit bug reports to starcluster@mit.edu
 
@@ -22,7 +23,7 @@ For example, to check which hosts are listed in the master node's
 or to quickly check the files in a given directory on ``node001``::
 
     $ starcluster sshnode mycluster node001 'ls -l /data'
-    StarCluster - (http://web.mit.edu/starcluster)
+    StarCluster - (http://star.mit.edu/cluster)
     Software Tools for Academics and Researchers (STAR)
     Please submit bug reports to starcluster@mit.edu
 
@@ -40,7 +41,7 @@ If the remote command is successful the exit code of either the **sshmaster**,
 **sshnode**, or **sshinstance** command will be 0::
 
     $ starcluster sshmaster mycluster 'uptime'
-    StarCluster - (http://web.mit.edu/starcluster)
+    StarCluster - (http://star.mit.edu/cluster)
     Software Tools for Academics and Researchers (STAR)
     Please submit bug reports to starcluster@mit.edu
 
@@ -52,7 +53,7 @@ Otherwise, the exit code will be identical to the remote command's non-zero
 exit code::
 
     $ starcluster sshmaster mycluster 'uptimes2'
-    StarCluster - (http://web.mit.edu/starcluster)
+    StarCluster - (http://star.mit.edu/cluster)
     Software Tools for Academics and Researchers (STAR)
     Please submit bug reports to starcluster@mit.edu
 
@@ -65,3 +66,17 @@ exit code::
 This allows you to use the **sshmaster**, **sshnode**, and **sshinstance**
 commands in scripts and check whether or not the remote command finished
 successfully.
+
+************************************
+Running X11 (Graphical) Applications
+************************************
+If you have OpenSSH installed and an X server you can enable X11 forwarding
+over SSH using the ``--forward-x11 (-X)`` option. This allows you to run
+graphical applications on the cluster and display them on your local computer.
+For example, to run `xterm` on the master node of `mycluster`::
+
+    $ starcluster sshmaster -X mycluster xterm
+
+The ``sshnode`` command also supports the ``-X`` option::
+
+    $ starcluster sshnode -X mycluster node001 xterm

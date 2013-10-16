@@ -1,7 +1,24 @@
+# Copyright 2009-2013 Justin Riley
+#
+# This file is part of StarCluster.
+#
+# StarCluster is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Lesser General Public License as published by the Free
+# Software Foundation, either version 3 of the License, or (at your option) any
+# later version.
+#
+# StarCluster is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+# FOR A PARTICULAR PURPOSE. See the GNU Lesser General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Lesser General Public License
+# along with StarCluster. If not, see <http://www.gnu.org/licenses/>.
+
 import posixpath
 
 from starcluster import threadpool
-from starcluster.clustersetup import ClusterSetup
+from starcluster import clustersetup
 from starcluster.logger import log
 
 core_site_templ = """\
@@ -74,7 +91,7 @@ mapred_site_templ = """\
 """
 
 
-class Hadoop(ClusterSetup):
+class Hadoop(clustersetup.ClusterSetup):
     """
     Configures Hadoop using Cloudera packages on StarCluster
     """
@@ -249,16 +266,15 @@ class Hadoop(ClusterSetup):
         master.ssh.execute('/etc/init.d/hadoop-0.20-namenode restart')
         log.info("Starting secondary namenode...")
         master.ssh.execute('/etc/init.d/hadoop-0.20-secondarynamenode restart')
-
+        log.info("Starting datanode on all nodes...")
         for node in nodes:
-            log.info("Starting datanode on %s..." % node.alias)
             self.pool.simple_job(self._start_datanode, (node,),
                                  jobid=node.alias)
         self.pool.wait()
         log.info("Starting jobtracker...")
         master.ssh.execute('/etc/init.d/hadoop-0.20-jobtracker restart')
+        log.info("Starting tasktracker on all nodes...")
         for node in nodes:
-            log.info("Starting tasktracker on %s..." % node.alias)
             self.pool.simple_job(self._start_tasktracker, (node,),
                                  jobid=node.alias)
         self.pool.wait()
@@ -274,11 +290,8 @@ class Hadoop(ClusterSetup):
                     group.authorize('tcp', port, port, '0.0.0.0/0')
 
     def run(self, nodes, master, user, user_shell, volumes):
-        try:
-            self._configure_hadoop(master, nodes, user)
-            self._start_hadoop(master, nodes)
-            self._open_ports(master)
-            log.info("Job tracker status: http://%s:50030" % master.dns_name)
-            log.info("Namenode status: http://%s:50070" % master.dns_name)
-        finally:
-            self.pool.shutdown()
+        self._configure_hadoop(master, nodes, user)
+        self._start_hadoop(master, nodes)
+        self._open_ports(master)
+        log.info("Job tracker status: http://%s:50030" % master.dns_name)
+        log.info("Namenode status: http://%s:50070" % master.dns_name)

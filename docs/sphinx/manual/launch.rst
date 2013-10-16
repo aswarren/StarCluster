@@ -1,5 +1,5 @@
-Launching a StarCluster on Amazon EC2
-=====================================
+Launching a Cluster on Amazon EC2
+=================================
 Use the **start** command in StarCluster to launch a new cluster on Amazon EC2.
 The start command takes two arguments: the cluster template and a tagname for
 cluster identification.
@@ -11,7 +11,7 @@ will be used throughout this section.
 .. code-block:: none
 
     $ starcluster start physicscluster # this line starts the cluster
-    StarCluster - (http://web.mit.edu/starcluster)
+    StarCluster - (http://star.mit.edu/cluster)
     Software Tools for Academics and Researchers (STAR)
     Please submit bug reports to starcluster@mit.edu
 
@@ -103,7 +103,7 @@ To list all of your StarClusters on Amazon EC2 run the following command::
 The output should look something like::
 
     $ starcluster listclusters
-    StarCluster - (http://web.mit.edu/starcluster)
+    StarCluster - (http://star.mit.edu/cluster)
     Software Tools for Academics and Researchers (STAR)
     Please submit bug reports to starcluster@mit.edu
 
@@ -129,8 +129,8 @@ To login to the master node as root::
 
     $ starcluster sshmaster physicscluster
 
-You can also login as a different user using the ``--user`` (``-u``) option.
-For example, to login as the ``sgeadmin`` user::
+You can login as a different user using the ``--user`` (``-u``) option. For
+example, to login as the ``sgeadmin`` user::
 
     $ starcluster sshmaster -u sgeadmin physicscluster
 
@@ -144,6 +144,20 @@ You can also login as a different user using the ``--user`` (``-u``) option.
 For example, to login as the ``sgeadmin`` user::
 
     $ starcluster sshnode -u sgeadmin physicscluster node001
+
+Running X11 (Graphical) Applications on the Cluster
+---------------------------------------------------
+If you have OpenSSH installed and an X server you can enable X11 forwarding
+over SSH using the ``--forward-x11 (-X)`` option. This allows you to run
+graphical applications on the cluster and display them on your local computer::
+
+    $ starcluster sshmaster -X mycluster
+
+When you login you should be able to run graphical applications, for example
+`xterm`, on the cluster and display them on your local computer. The
+``sshnode`` command also supports the ``-X`` option::
+
+    $ starcluster sshnode -X mycluster node001
 
 Rebooting a Cluster
 -------------------
@@ -177,7 +191,7 @@ starting::
 This command will prompt for confirmation before destroying the cluster::
 
     $ starcluster terminate physicscluster
-    StarCluster - (http://web.mit.edu/starcluster)
+    StarCluster - (http://star.mit.edu/cluster)
     Software Tools for Academics and Researchers (STAR)
     Please submit bug reports to starcluster@mit.edu
 
@@ -210,7 +224,7 @@ charged for ``stopped`` instance hours, only for the EBS volume storage backing
 the nodes::
 
     $ starcluster listclusters
-    StarCluster - (http://web.mit.edu/starcluster)
+    StarCluster - (http://star.mit.edu/cluster)
     Software Tools for Academics and Researchers (STAR)
     Please submit bug reports to starcluster@mit.edu
 

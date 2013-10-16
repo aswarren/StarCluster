@@ -1,3 +1,21 @@
+# Copyright 2009-2013 Justin Riley
+#
+# This file is part of StarCluster.
+#
+# StarCluster is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Lesser General Public License as published by the Free
+# Software Foundation, either version 3 of the License, or (at your option) any
+# later version.
+#
+# StarCluster is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+# FOR A PARTICULAR PURPOSE. See the GNU Lesser General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Lesser General Public License
+# along with StarCluster. If not, see <http://www.gnu.org/licenses/>.
+
+from starcluster import static
 from completers import ClusterCompleter
 
 
@@ -52,17 +70,34 @@ class CmdAddNode(ClusterCompleter):
     tag = None
 
     def addopts(self, parser):
-        parser.add_option("-a", "--alias", dest="alias",
-                          action="append", type="string", default=[],
-                          help="alias to give to the new node "
-                          "(e.g. node007, mynode, etc.)")
-        parser.add_option("-n", "--num-nodes", dest="num_nodes",
-                          action="store", type="int", default=1,
-                          help="number of new nodes to launch")
-        parser.add_option("-x", "--no-create", dest="no_create",
-                          action="store_true", default=False,
-                          help="do not launch new EC2 instances when "
-                          "adding nodes (use existing instances instead)")
+        parser.add_option(
+            "-a", "--alias", dest="alias", action="append", type="string",
+            default=[], help="alias to give to the new node "
+            "(e.g. node007, mynode, etc.)")
+        parser.add_option(
+            "-n", "--num-nodes", dest="num_nodes", action="store", type="int",
+            default=1, help="number of new nodes to launch")
+        parser.add_option(
+            "-i", "--image-id", dest="image_id", action="store", type="string",
+            default=None, help="image id for new node(s) "
+            "(e.g. ami-12345678).")
+        parser.add_option(
+            "-I", "--instance-type", dest="instance_type",
+            action="store", type="choice", default=None,
+            choices=sorted(static.INSTANCE_TYPES.keys()),
+            help="The instance type to use when launching volume "
+            "host instance")
+        parser.add_option(
+            "-z", "--availability-zone", dest="zone", action="store",
+            type="string", default=None, help="availability zone for "
+            "new node(s) (e.g. us-east-1)")
+        parser.add_option(
+            "-b", "--bid", dest="spot_bid", action="store", type="float",
+            default=None, help="spot bid for new node(s) (in $ per hour)")
+        parser.add_option(
+            "-x", "--no-create", dest="no_create", action="store_true",
+            default=False, help="do not launch new EC2 instances when "
+            "adding nodes (use existing instances instead)")
 
     def _get_duplicate(self, lst):
         d = {}
@@ -76,6 +111,7 @@ class CmdAddNode(ClusterCompleter):
         if len(args) != 1:
             self.parser.error("please specify a cluster <cluster_tag>")
         tag = self.tag = args[0]
+
         aliases = []
         for alias in self.opts.alias:
             aliases.extend(alias.split(','))
@@ -95,4 +131,7 @@ class CmdAddNode(ClusterCompleter):
             self.parser.error("you must specify one or more node aliases via "
                               "the -a option when using -x")
         self.cm.add_nodes(tag, num_nodes, aliases=aliases,
+                          image_id=self.opts.image_id,
+                          instance_type=self.opts.instance_type,
+                          zone=self.opts.zone, spot_bid=self.opts.spot_bid,
                           no_create=self.opts.no_create)

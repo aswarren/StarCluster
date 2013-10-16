@@ -1,3 +1,20 @@
+# Copyright 2009-2013 Justin Riley
+#
+# This file is part of StarCluster.
+#
+# StarCluster is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Lesser General Public License as published by the Free
+# Software Foundation, either version 3 of the License, or (at your option) any
+# later version.
+#
+# StarCluster is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+# FOR A PARTICULAR PURPOSE. See the GNU Lesser General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Lesser General Public License
+# along with StarCluster. If not, see <http://www.gnu.org/licenses/>.
+
 from starcluster import utils
 from starcluster import exception
 from starcluster import clustersetup
@@ -30,7 +47,7 @@ class TmuxControlCenter(clustersetup.DefaultClusterSetup):
     def _select_layout(self, node, envname, layout="main-vertical", window=''):
         if layout not in self._layouts:
             raise exception.PluginError("unknown layout (options: %s)" %
-                                          ", ".join(self._layouts))
+                                        ", ".join(self._layouts))
         cmd = 'tmux select-layout -t %s:%s %s'
         return node.ssh.get_status(cmd % (envname, window, layout))
 
@@ -61,10 +78,13 @@ class TmuxControlCenter(clustersetup.DefaultClusterSetup):
         node.ssh.execute('tmux send-keys -t %s:%s "Enter"' % (envname, window))
 
     def _new_session(self, node, envname):
-        node.ssh.execute('tmux new-session -d -s %s' % envname, detach=True)
+        node.ssh.execute('tmux new-session -d -s %s' % envname)
 
     def _kill_session(self, node, envname):
         node.ssh.execute('tmux kill-session -t %s' % envname)
+
+    def _kill_window(self, node, envname, window):
+        node.ssh.execute('tmux kill-window -t %s:%s' % (envname, window))
 
     def _new_window(self, node, envname, title):
         node.ssh.execute('tmux new-window -n %s -t %s:' % (title, envname))
@@ -143,12 +163,33 @@ class TmuxControlCenter(clustersetup.DefaultClusterSetup):
         self._user_shell = user_shell
         self._volumes = volumes
         self.add_to_utmp_group(master, user)
-        self.setup_tmuxcc(user=user)
         self.setup_tmuxcc(user='root')
+        self.setup_tmuxcc(user=user)
+
+    def _add_to_tmuxcc(self, client, node, user='root'):
+        orig_user = client.ssh._username
+        if orig_user != user:
+            client.ssh.connect(username=user)
+        self._new_window(client, self._envname, node.alias)
+        self._send_keys(client, self._envname, cmd='ssh %s' % node.alias,
+                        window=node.alias)
+        if orig_user != user:
+            client.ssh.connect(username=orig_user)
+
+    def _remove_from_tmuxcc(self, client, node, user='root'):
+        orig_user = client.ssh._username
+        if orig_user != user:
+            client.ssh.connect(username=user)
+        self._kill_window(client, self._envname, node.alias)
+        if orig_user != user:
+            client.ssh.connect(username=orig_user)
 
     def on_add_node(self, node, nodes, master, user, user_shell, volumes):
         log.info("Adding %s to TMUX Control Center" % node.alias)
-        #user_home = node.getpwnam(user).pw_dir
+        self._add_to_tmuxcc(master, node, user='root')
+        self._add_to_tmuxcc(master, node, user=user)
 
     def on_remove_node(self, node, nodes, master, user, user_shell, volumes):
         log.info("Removing %s from TMUX Control Center" % node.alias)
+        self._remove_from_tmuxcc(master, node, user='root')
+        self._remove_from_tmuxcc(master, node, user=user)

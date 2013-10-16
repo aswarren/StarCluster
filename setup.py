@@ -1,9 +1,26 @@
 #!/usr/bin/env python
+# Copyright 2009-2013 Justin Riley
+#
+# This file is part of StarCluster.
+#
+# StarCluster is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Lesser General Public License as published by the Free
+# Software Foundation, either version 3 of the License, or (at your option) any
+# later version.
+#
+# StarCluster is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+# FOR A PARTICULAR PURPOSE. See the GNU Lesser General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Lesser General Public License
+# along with StarCluster. If not, see <http://www.gnu.org/licenses/>.
+
 import os
 import sys
 
-if sys.version_info < (2, 5):
-    error = "ERROR: StarCluster requires Python 2.5+ ... exiting."
+if sys.version_info < (2, 6):
+    error = "ERROR: StarCluster requires Python 2.6+ ... exiting."
     print >> sys.stderr, error
     sys.exit(1)
 
@@ -12,10 +29,11 @@ try:
     console_scripts = ['starcluster = starcluster.cli:main']
     extra = dict(test_suite="starcluster.tests",
                  tests_require="nose",
-                 install_requires=["paramiko==1.7.7.1", "boto==2.0",
-                                   "workerpool==0.9.2", "Jinja2==2.5.5",
-                                   "decorator==3.3.1", "pyasn1==0.0.13b",
-                                   "python-daemon==1.5.5"],				   
+                 install_requires=["paramiko>=1.11.0", "boto>=2.10.0",
+                                   "workerpool>=0.9.2", "Jinja2>=2.7",
+                                   "decorator>=3.4.0", "pyasn1>=0.1.7",
+                                   "iptools>=0.6.1", "optcomplete>=1.2-devel",
+                                   "python-daemon==1.5.5"],
                  include_package_data=True,
                  entry_points=dict(console_scripts=console_scripts),
                  zip_safe=False)
@@ -54,8 +72,9 @@ except ImportError:
             where, prefix = stack.pop(0)
             for name in os.listdir(where):
                 fn = os.path.join(where, name)
-                if ('.' not in name and os.path.isdir(fn) and
-                    os.path.isfile(os.path.join(fn, '__init__.py'))):
+                isdir = os.path.isdir(fn)
+                has_init = os.path.isfile(os.path.join(fn, '__init__.py'))
+                if '.' not in name and isdir and has_init:
                     out.append(prefix + name)
                     stack.append((fn, prefix + name + '.'))
         for pat in list(exclude) + ['ez_setup', 'distribute_setup']:
@@ -63,7 +82,7 @@ except ImportError:
             out = [item for item in out if not fnmatchcase(item, pat)]
         return out
 
-    extra = {}
+    extra = {'scripts': ['bin/starcluster']}
 
 VERSION = 0.9999
 static = os.path.join('starcluster', 'static.py')
@@ -77,11 +96,10 @@ setup(
     packages=find_packages(),
     package_data={'starcluster.templates':
                   ['web/*.*', 'web/css/*', 'web/js/*']},
-    scripts=['bin/starcluster'],
     license='LGPL3',
     author='Justin Riley',
     author_email='justin.t.riley@gmail.com',
-    url="http://web.mit.edu/starcluster",
+    url="http://star.mit.edu/cluster",
     description="StarCluster is a utility for creating and managing computing "
     "clusters hosted on Amazon's Elastic Compute Cloud (EC2).",
     long_description=README,
@@ -97,6 +115,8 @@ setup(
         'License (LGPL)',
         'Natural Language :: English',
         'Programming Language :: Python',
+        'Programming Language :: Python :: 2.6',
+        'Programming Language :: Python :: 2.7',
         'Operating System :: OS Independent',
         'Operating System :: POSIX',
         'Topic :: Education',

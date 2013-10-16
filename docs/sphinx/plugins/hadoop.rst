@@ -22,7 +22,7 @@ it easier to manage HDFS.
 
 .. seealso::
 
-    Learn more about Hadoop at it's `project page <Hadoop>`_
+    Learn more about Hadoop at it's `project page <http://hadoop.apache.org>`_
 
 *****
 Usage
@@ -48,7 +48,7 @@ originally have hadoop in its plugin list you can manually run the plugin
 using::
 
     $ starcluster runplugin hadoop mycluster
-    StarCluster - (http://web.mit.edu/starcluster)
+    StarCluster - (http://star.mit.edu/cluster)
     Software Tools for Academics and Researchers (STAR)
     Please submit bug reports to starcluster@mit.edu
 

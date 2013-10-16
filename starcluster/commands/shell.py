@@ -1,3 +1,20 @@
+# Copyright 2009-2013 Justin Riley
+#
+# This file is part of StarCluster.
+#
+# StarCluster is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Lesser General Public License as published by the Free
+# Software Foundation, either version 3 of the License, or (at your option) any
+# later version.
+#
+# StarCluster is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+# FOR A PARTICULAR PURPOSE. See the GNU Lesser General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Lesser General Public License
+# along with StarCluster. If not, see <http://www.gnu.org/licenses/>.
+
 import os
 import sys
 import base64
@@ -25,7 +42,7 @@ class CmdShell(CmdBase):
         s3 - starcluster.awsutils.EasyS3 instance
 
     All StarCluster modules are automatically imported in the IPython session
-    along with all StarCluster dependencies (e.g. boto, paramiko, etc.)
+    along with all StarCluster dependencies (e.g. boto, ssh, etc.)
 
     If the --ipcluster=CLUSTER (-p) is passed, the IPython session will be
     automatically be configured to connect to the remote CLUSTER using
@@ -84,7 +101,7 @@ class CmdShell(CmdBase):
 
     def execute(self, args):
         local_ns = dict(cfg=self.cfg, ec2=self.ec2, s3=self.s3, cm=self.cm,
-                        starcluster=starcluster)
+                        starcluster=starcluster, log=log)
         if self.opts.ipcluster:
             log.info("Loading parallel IPython library")
             try:
@@ -109,7 +126,8 @@ class CmdShell(CmdBase):
                                       'ipcontroller-client.json')
                 if cl.master_node.ssh.isfile(json):
                     log.info("Fetching connector file from cluster...")
-                    os.makedirs(ipcluster_dir)
+                    if not os.path.exists(ipcluster_dir):
+                        os.makedirs(ipcluster_dir)
                     cl.master_node.ssh.get(json, local_json)
                 else:
                     self.parser.error(
@@ -119,7 +137,7 @@ class CmdShell(CmdBase):
             key_location = cl.master_node.key_location
             self._add_to_known_hosts(cl.master_node)
             log.info("Loading parallel IPython client and view")
-            rc = Client(local_json, sshkey=key_location, packer='pickle')
+            rc = Client(local_json, sshkey=key_location)
             local_ns['Client'] = Client
             local_ns['ipcluster'] = cl
             local_ns['ipclient'] = rc
@@ -127,7 +145,8 @@ class CmdShell(CmdBase):
         modules = [(starcluster.__name__ + '.' + module, module)
                    for module in starcluster.__all__]
         modules += [('boto', 'boto'), ('paramiko', 'paramiko'),
-                    ('workerpool', 'workerpool'), ('jinja2', 'jinja2')]
+                    ('workerpool', 'workerpool'), ('jinja2', 'jinja2'),
+                    ('pyasn1', 'pyasn1'), ('iptools', 'iptools')]
         for fullname, modname in modules:
             log.info('Importing module %s' % modname)
             try:
