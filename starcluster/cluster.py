@@ -782,7 +782,7 @@ class Cluster(object):
     def create_node(self, alias, image_id=None, instance_type=None, zone=None,
                     placement_group=None, spot_bid=None, force_flat=False):
         return self.create_nodes([alias], image_id=image_id,
-                                 instance_type=instance_type, count=1,
+                                 instance_type=instance_type,
                                  zone=zone, placement_group=placement_group,
                                  spot_bid=spot_bid, force_flat=force_flat)[0]
 
@@ -1040,7 +1040,6 @@ class Cluster(object):
                              (alias, image, type))
                 master_response = self.create_nodes(aliases, image_id=image,
                                                     instance_type=type,
-                                                    count=len(aliases),
                                                     force_flat=True)[0]
                 zone = master_response.instances[0].placement
                 insts.extend(master_response.instances)
